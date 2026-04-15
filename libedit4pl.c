@@ -317,6 +317,31 @@ el_cursor_emulated(EditLine *el, int count)
 }
 #endif
 
+/* el_bracketed_paste():
+ *	Write the bracketed-paste enable (enable=1) or disable (enable=0)
+ *	escape sequence to the terminal output.  On Windows the output handle
+ *	is obtained via EL_GETHANDLE; on Unix via EL_GETFP.
+ */
+static void
+el_bracketed_paste(EditLine *el, int enable)
+{ const char *seq = enable ? "\033[?2004h" : "\033[?2004l";
+  size_t len = strlen(seq);
+
+#ifdef __WINDOWS__
+  { HANDLE hOut;
+    DWORD written;
+    if ( el_get(el, EL_GETHANDLE, 1, &hOut) == 0 )
+      WriteFile(hOut, seq, (DWORD)len, &written, NULL);
+  }
+#else
+  { FILE *fout;
+    if ( el_get(el, EL_GETFP, 1, &fout) == 0 )
+    { fwrite(seq, 1, len, fout);
+      fflush(fout);
+    }
+  }
+#endif
+}
 
 		 /*******************************
 		 *	  SIGNAL HANDLING	*
@@ -486,11 +511,13 @@ el_sighandler(int sig)
   prepare_signals(el_signals);
 }
 
-
 static const char *
 el_siggets(EditLine *el, int *count)
 { el_context *ctx;
   const char *line;
+
+  /* Re-enable bracketed paste mode in case a subprocess disabled it. */
+  el_bracketed_paste(el, 1);
 
   el_get(el, EL_CLIENTDATA, (void**)&ctx);
   if ( ctx->is_stdin )
@@ -1408,6 +1435,7 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 	el_set( ctx->el, EL_EDITOR,     "emacs");
 	el_set( ctx->el, EL_CLIENTDATA, ctx);
 	electric_init(ctx->el);
+	el_bracketed_paste(ctx->el, 1);
 
 	ctx->orig_functions  = in->functions;
 	ctx->functions       = *in->functions;
@@ -1539,6 +1567,7 @@ pl_unwrap(term_t tin)
     ctx->estream->functions = ctx->orig_functions;
 
     history_end(ctx->history);
+    el_bracketed_paste(ctx->el, 0);
 #ifndef __WINDOWS__
     for(int i=0; i<=2; i++)
     { FILE *fd;
@@ -1740,11 +1769,29 @@ interface of libedit.
 static int
 bind_command(el_context *ctx, const char *key, const char *cmd)
 { int k;
+  const char *p = key;
+  size_t len;
 
-  if ( key[0] == '^' && key[1] == '[' )
-    key += 2;					/* See (*) */
+  /* Strip ESC prefix: either '^[' notation or raw ESC byte */
+  if ( p[0] == '^' && p[1] == '[' )
+    p += 2;					/* See (*) */
+  else if ( (unsigned char)p[0] == 0x1b && p[1] )
+    p += 1;					/* raw ESC byte */
 
-  if ( get_key(key, &k) )
+  len = strlen(p);
+
+  /* libedit passes the last character of the sequence as ch to
+   * prolog_function().  For a simple X or ^X use get_key(); for longer
+   * sequences (e.g. ESC[200~) use the last raw byte.
+   */
+  if ( len == 0 ||
+       (len <= 2 && (len < 2 || p[0] == '^')) )
+  { if ( !get_key(p, &k) )
+      return TRUE;
+  } else
+  { k = (unsigned char)p[len-1];
+  }
+
   { atom_t cname = PL_new_atom(cmd);
     command *c;
 

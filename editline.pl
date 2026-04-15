@@ -151,9 +151,11 @@ add_prolog_commands(Input) :-
     el_addfn(Input, electric, 'Indicate matching bracket', electric),
     el_addfn(Input, isearch_history, 'Incremental search in history',
              isearch_history),
+    el_addfn(Input, bracketed_paste, 'Handle bracketed paste', bracketed_paste),
     el_bind(Input, ["^I",  complete]),
     el_bind(Input, ["^[?", show_completions]),
     el_bind(Input, ["^R",  isearch_history]),
+    el_bind(Input, ["\e[200~", bracketed_paste]),
     bind_electric(Input),
     add_paste_quoted(Input),
     el_source(Input, _).
@@ -878,6 +880,56 @@ clipboard_content(Text) :-
                       autoload_call(
                           get(@(display), paste, primary, string(Text))))).
 clipboard_content("").
+
+
+                /*******************************
+                *       BRACKETED PASTE        *
+                *******************************/
+
+%!  bracketed_paste(+Input, +Char, -Continue) is det.
+%
+%   Handler for the bracketed paste start sequence ESC[200~.  Reads
+%   characters until the end sequence ESC[201~ is received and inserts
+%   the collected text literally, bypassing per-character key dispatch.
+%
+%   The terminal is asked to enable bracketed paste mode (ESC[?2004h)
+%   from the C layer each time a prompt is issued.
+
+bracketed_paste(Input, _Char, Continue) :-
+    collect_paste(Input, [], RevCodes),
+    reverse(RevCodes, Codes),
+    string_codes(Text, Codes),
+    el_insertstr(Input, Text),
+    Continue = refresh.
+
+%!  collect_paste(+Input, +RevAcc, -RevResult) is det.
+%
+%   Read characters one at a time, accumulating them in reverse order.
+%   Stop when the reversed accumulator starts with the end sequence
+%   ESC[201~ (27,91,50,48,49,126) and return the reversed content that
+%   precedes it.
+
+collect_paste(Input, RevCodes, Result) :-
+    el_getc(Input, Char),
+    (   Char == -1                          % EOF / error
+    ->  Result = RevCodes
+    ;   paste_char(Char, Char1),
+        RevCodes1 = [Char1|RevCodes],
+        (   RevCodes1 = [0'~,0'1,0'0,0'2,0'[,0'\e|Rest]  % ESC[201~ reversed
+        ->  Result = Rest
+        ;   collect_paste(Input, RevCodes1, Result)
+        )
+    ).
+
+%!  paste_char(+Raw, -Char) is det.
+%
+%   Translate a raw character code from bracketed paste to the intended
+%   code.  The tty line discipline in edit mode has INLCR set, which maps
+%   LF (10) to CR (13) before libedit reads it.  We reverse that here so
+%   pasted newlines are inserted as actual newlines.
+
+paste_char(0'\r, 0'\n) :- !.               % CR → LF (INLCR maps \n to \r in edit mode)
+paste_char(C,   C).
 
 
                 /*******************************
