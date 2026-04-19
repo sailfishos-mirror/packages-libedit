@@ -67,6 +67,18 @@
 #include <io.h>
 #endif
 
+/* libedit's included config.h doesn't carry a SIZEOF_WCHAR_T define on
+ * every platform.  Fall back to the compiler-provided intrinsic so
+ * the `#if SIZEOF_WCHAR_T == 2` branches here actually fire where they
+ * should (e.g. MinGW/MSVC Windows with 16-bit wchar_t). */
+#ifndef SIZEOF_WCHAR_T
+#  ifdef __SIZEOF_WCHAR_T__
+#    define SIZEOF_WCHAR_T __SIZEOF_WCHAR_T__
+#  else
+#    define SIZEOF_WCHAR_T 4
+#  endif
+#endif
+
 #ifndef EPILOG
 #define EPILOG 0x400		/* Windows: Epilog using pipes */
 #endif
@@ -189,6 +201,15 @@ typedef struct el_context
   } electric;
 #ifndef HAVE_EL_CURSOR
   int			move_cursor;	/* Amount to move the cursor */
+#endif
+#if SIZEOF_WCHAR_T == 2
+  int			pending_trail;	/* Queued UTF-16 trail surrogate;
+					   0 if none.  Needed when the
+					   decoded input is a supplementary
+					   code point but wchar_t holds only
+					   16 bits: read_char returns the
+					   lead first and the trail on the
+					   next call. */
 #endif
 } el_context;
 
@@ -1035,6 +1056,16 @@ read_char(EditLine *el, el_char_t *cp)
     size_t start = 0;
     ssize_t bytes;
 
+#if SIZEOF_WCHAR_T == 2
+    /* Finish emitting a supplementary code point held over from a
+     * previous read_char call. */
+    if ( ctx->pending_trail != 0 )
+    { *cp = (el_char_t)ctx->pending_trail;
+      ctx->pending_trail = 0;
+      return 1;
+    }
+#endif
+
     ctx->dispatching++;
     bytes = pipe_read_or_msg(hIn, &buffer[start], 1);
     ctx->dispatching--;
@@ -1064,7 +1095,22 @@ read_char(EditLine *el, el_char_t *cp)
 	}
 	int chr;
 	utf8_get_char(buffer, &chr);
+#if SIZEOF_WCHAR_T == 2
+	/* On Windows wchar_t is a 16-bit UTF-16 code unit, so a
+	 * supplementary code point (U+10000 and above — emoji, CJK
+	 * extensions) cannot fit into one el_char_t.  Return the lead
+	 * surrogate now and queue the trail for the next read_char
+	 * call. */
+	if ( chr > 0xFFFF )
+	{ int c = chr - 0x10000;
+	  ctx->pending_trail = 0xDC00 | (c & 0x3FF);
+	  *cp = (el_char_t)(0xD800 | (c >> 10));
+	} else
+	{ *cp = (el_char_t)chr;
+	}
+#else
 	*cp = chr;
+#endif
 	return 1;
       }
     } else
