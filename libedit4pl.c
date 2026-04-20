@@ -2046,7 +2046,27 @@ pl_getc(term_t tin, term_t c)
   { wchar_t wc;
     switch(el_wgetc(ctx->el, &wc))
     { case 1:
+      {
+#if SIZEOF_WCHAR_T == 2
+	/* On Windows wchar_t is a 16-bit UTF-16 code unit, so a
+	 * supplementary code point (emoji, non-BMP CJK) arrives from
+	 * the line buffer as a surrogate pair — two successive
+	 * el_wgetc calls.  Reassemble the pair into a single code
+	 * point so callers (e.g. editline.pl:bracketed_paste/3 with
+	 * its string_codes/2) receive a valid Unicode scalar value
+	 * instead of a lone surrogate that Prolog refuses to encode. */
+	if ( wc >= 0xD800 && wc <= 0xDBFF )	/* UTF-16 lead */
+	{ wchar_t wt;
+	  if ( el_wgetc(ctx->el, &wt) == 1 &&
+	       wt >= 0xDC00 && wt <= 0xDFFF )	/* UTF-16 trail */
+	  { int cp = ((wc - 0xD800) << 10) + (wt - 0xDC00) + 0x10000;
+	    return PL_unify_integer(c, cp);
+	  }
+	  /* malformed — no trail available; surface the lead as-is */
+	}
+#endif
 	return PL_unify_integer(c, wc);
+      }
       case 0:
 	return PL_unify_integer(c, -1);
       case -1:
