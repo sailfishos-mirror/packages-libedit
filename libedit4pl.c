@@ -1123,7 +1123,15 @@ read_char(EditLine *el, el_char_t *cp)
   { INPUT_RECORD ev;
     DWORD done;
 
-    BOOL rc = ReadConsoleInput(hIn, &ev, 1, &done);
+    /* Explicit W variant: the A version would deliver paste/typed
+     * characters as the console's OEM/ANSI codepage byte in
+     * ev.Event.KeyEvent.uChar.AsciiChar, which leaves uChar.UnicodeChar
+     * with at best a low-byte-truncated value.  On a CP_437 console
+     * that turns a pasted 'à' (U+00E0) into 0x85 (the CP_437 byte for
+     * à), which libedit then renders as its control-char escape
+     * '^Å' (^ followed by 0x85|0x40 = 0xC5 = Å).  Using W makes the
+     * event carry the real UTF-16 code unit. */
+    BOOL rc = ReadConsoleInputW(hIn, &ev, 1, &done);
     if ( rc )
     { if ( done == 1 )
       { switch(ev.EventType)
