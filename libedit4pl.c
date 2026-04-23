@@ -345,7 +345,7 @@ el_cursor_emulated(EditLine *el, int count)
  *	is obtained via EL_GETHANDLE; on Unix via EL_GETFP.
  */
 static void
-el_bracketed_paste(EditLine *el, int enable)
+el_bracketed_paste(EditLine *el, bool enable)
 { const char *seq = enable ? "\033[?2004h" : "\033[?2004l";
   size_t len = strlen(seq);
 
@@ -539,7 +539,7 @@ el_siggets(EditLine *el, int *count)
   const char *line;
 
   /* Re-enable bracketed paste mode in case a subprocess disabled it. */
-  el_bracketed_paste(el, 1);
+  el_bracketed_paste(el, true);
 
   el_get(el, EL_CLIENTDATA, (void**)&ctx);
   if ( ctx->is_stdin )
@@ -1490,7 +1490,7 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 	el_set( ctx->el, EL_EDITOR,     "emacs");
 	el_set( ctx->el, EL_CLIENTDATA, ctx);
 	electric_init(ctx->el);
-	el_bracketed_paste(ctx->el, 1);
+	el_bracketed_paste(ctx->el, true);
 
 	ctx->orig_functions  = in->functions;
 	ctx->functions       = *in->functions;
@@ -1622,7 +1622,7 @@ pl_unwrap(term_t tin)
     ctx->estream->functions = ctx->orig_functions;
 
     history_end(ctx->history);
-    el_bracketed_paste(ctx->el, 0);
+    el_bracketed_paste(ctx->el, false);
 #ifndef __WINDOWS__
     for(int i=0; i<=2; i++)
     { FILE *fd;
