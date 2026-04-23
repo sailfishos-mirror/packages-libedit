@@ -129,7 +129,8 @@ el_wrap(Options) :-
     el_wrap(swipl, user_input, user_output, user_error, Options1),
     add_prolog_commands(user_input),
     ignore(el_set(user_input, wordchars("_"))),
-    forall(el_setup(user_input), true).
+    forall(el_setup(user_input), true),
+    enable_bracketed_paste(user_input).
 el_wrap(_).
 
 el_default(history(Size)) :-
@@ -156,10 +157,26 @@ add_prolog_commands(Input) :-
     el_bind(Input, ["^I",  complete]),
     el_bind(Input, ["^[?", show_completions]),
     el_bind(Input, ["^R",  isearch_history]),
-    el_bind(Input, ["\e[200~", bracketed_paste]),
     bind_electric(Input),
     add_paste_quoted(Input),
     el_source(Input, _).
+
+%!  enable_bracketed_paste(+Input) is det.
+%
+%   Sync bracketed paste mode with the current editor: bind ESC[200~
+%   to bracketed_paste/3 and enable the mode in emacs, unbind and
+%   disable it in vi.  In vi mode ESC leaves insert mode, so the
+%   ESC[200~ start marker cannot be dispatched as a key binding.
+%   Called from el_wrap/1 after the el_setup/1 hook, since that hook
+%   may switch editor with el_bind/2 `-v` or `-e`.
+
+enable_bracketed_paste(Input) :-
+    (   el_get(Input, editor(vi))
+    ->  el_bind(Input, ['-r', "\e[200~"]),
+        el_set(Input, bracketed_paste(false))
+    ;   el_bind(Input, ["\e[200~", bracketed_paste]),
+        el_set(Input, bracketed_paste(true))
+    ).
 
 %!  el_wrap(+ProgName:atom, +In:stream, +Out:stream, +Error:stream) is det.
 %!  el_wrap(+ProgName:atom, +In:stream, +Out:stream, +Error:stream, +Options) is det.
@@ -258,6 +275,14 @@ el_wrap(ProgName, In, Out, Error) :-
 %       Set the characters considered part of a _word_.  This feature
 %       depends on el_wsey() ``EL_WORDCHARS``, which is only provided
 %       in some recent versions of `libedit`.
+%     - bracketed_paste(+Boolean)
+%       Enable or disable bracketed paste mode.  When enabled, the
+%       terminal is asked to bracket pasted text with ``ESC[200~`` /
+%       ``ESC[201~`` before each prompt, which the default bindings
+%       route through bracketed_paste/3.  Disabling sends the matching
+%       ``ESC[?2004l`` sequence immediately.  enable_bracketed_paste/1
+%       manages this based on the current editor; you normally do not
+%       need to set it directly.
 %
 %   This predicate fails silently of Action  is not implemented. Illegal
 %   input raises in an exception.
@@ -269,6 +294,9 @@ el_wrap(ProgName, In, Out, Error) :-
 %     - editor(-Editor)
 %       Editor is unified with `emacs` or `vi`, reflecting the current
 %       keymap selected via el_bind/2 with `-e` / `-v`.
+%     - bracketed_paste(-Boolean)
+%       Whether bracketed paste mode is currently enabled; see
+%       el_set/2.
 %
 %   Any other Property raises a `domain_error(editline_property, _)`.
 

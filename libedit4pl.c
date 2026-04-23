@@ -103,6 +103,7 @@ static atom_t ATOM_next_str;
 static atom_t ATOM_event;
 static atom_t ATOM_wordchars;
 static atom_t ATOM_editor;
+static atom_t ATOM_bracketed_paste;
 
 static functor_t FUNCTOR_error2;
 static functor_t FUNCTOR_editline1;
@@ -192,6 +193,7 @@ typedef struct el_context
   binding	       *bindings;	/* Bindings to user commands */
   int			reader;		/* Current reader thread */
   bool			is_stdin;	/* Reading from file 0 */
+  bool			bracketed_paste;/* Keep bracketed paste mode enabled */
   short			dispatching;	/* We are dispatching an event */
   unsigned int		flags;		/* Misc flags */
   int			histsize;	/* History size */
@@ -538,10 +540,11 @@ el_siggets(EditLine *el, int *count)
 { el_context *ctx;
   const char *line;
 
-  /* Re-enable bracketed paste mode in case a subprocess disabled it. */
-  el_bracketed_paste(el, true);
-
   el_get(el, EL_CLIENTDATA, (void**)&ctx);
+  /* Re-enable bracketed paste mode in case a subprocess disabled it. */
+  if ( ctx->bracketed_paste )
+    el_bracketed_paste(el, true);
+
   if ( ctx->is_stdin )
   { prepare_signals(el_signals);
     line = el_gets(el, count);
@@ -1464,6 +1467,7 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 	ctx->is_stdin = (fd_in == 0);
 #endif
 	ctx->flags   = el_flags;
+	ctx->bracketed_paste = false;
 	ctx->istream = in;
 	ctx->ostream = out;
 	ctx->estream = err;
@@ -1490,7 +1494,6 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 	el_set( ctx->el, EL_EDITOR,     "emacs");
 	el_set( ctx->el, EL_CLIENTDATA, ctx);
 	electric_init(ctx->el);
-	el_bracketed_paste(ctx->el, true);
 
 	ctx->orig_functions  = in->functions;
 	ctx->functions       = *in->functions;
@@ -1854,6 +1857,17 @@ bind_command(el_context *ctx, const char *key, const char *cmd)
     { if ( c->name == cname )
       { binding *b;
 
+	/* libedit's keymap replaces on re-bind; mirror that here so
+	 * repeated el_bind calls for the same key don't stack multiple
+	 * entries (which prolog_function would then all dispatch). */
+	for(b=ctx->bindings; b; b=b->next)
+	{ if ( b->ch == k )
+	  { b->command = c;
+	    PL_unregister_atom(cname);
+	    return TRUE;
+	  }
+	}
+
 	if ( !(b=malloc(sizeof(*b))) )
 	  return PL_resource_error("memory");
 	b->ch	      = k;
@@ -1967,6 +1981,19 @@ pl_set(term_t tin, term_t option)
 	  return false;
       } else
 #endif
+      if ( arity == 1 && name == ATOM_bracketed_paste )
+      { int v;
+
+	if ( PL_get_arg(1, option, a) &&
+	     PL_get_bool_ex(a, &v) )
+	{ if ( ctx->bracketed_paste != v )
+	  { ctx->bracketed_paste = v;
+	    el_bracketed_paste(ctx->el, v);
+	  }
+	  return true;
+	}
+	return false;
+      } else
       { return false;
       }
 
@@ -2002,6 +2029,13 @@ pl_get(term_t tin, term_t option)
 
     return PL_get_arg(1, option, a) &&
            PL_unify_wchars(a, PL_ATOM, (size_t)-1, ed);
+  }
+
+  if ( arity == 1 && name == ATOM_bracketed_paste )
+  { term_t a = PL_new_term_ref();
+
+    return PL_get_arg(1, option, a) &&
+           PL_unify_bool(a, ctx->bracketed_paste);
   }
 
   return PL_domain_error("editline_property", option);
@@ -2573,6 +2607,7 @@ install_libedit4pl(void)
   MKATOM(event);
   MKATOM(wordchars);
   MKATOM(editor);
+  MKATOM(bracketed_paste);
 
   MKFUNCTOR(error, 2);
   MKFUNCTOR(editline, 1);
