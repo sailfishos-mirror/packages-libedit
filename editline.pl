@@ -45,6 +45,7 @@
             el_source/2,                        % +Input, +File
             el_bind/2,                          % +Input, +Args
             el_set/2,                           % +Input, +Action
+            el_get/2,                           % +Input, ?Property
             el_addfn/4,                         % +Input, +Name, +Help, :Goal
             el_cursor/2,                        % +Input, +Move
             el_line/2,                          % +Input, -Line
@@ -260,6 +261,16 @@ el_wrap(ProgName, In, Out, Error) :-
 %
 %   This predicate fails silently of Action  is not implemented. Illegal
 %   input raises in an exception.
+
+%!  el_get(+Input:stream, ?Property) is semidet.
+%
+%   Interface to el_get().  Currently supported Property terms:
+%
+%     - editor(-Editor)
+%       Editor is unified with `emacs` or `vi`, reflecting the current
+%       keymap selected via el_bind/2 with `-e` / `-v`.
+%
+%   Any other Property raises a `domain_error(editline_property, _)`.
 
 %!  el_line(+Input:stream, -Line) is det.
 %
