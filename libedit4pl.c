@@ -341,6 +341,60 @@ el_cursor_emulated(EditLine *el, int count)
 }
 #endif
 
+/* el_cursor_cp_delta():
+ *	Translate a CODE-POINT delta (the count Prolog hands us via
+ *	`string_length` and matching_open's index) into a WCHAR_T
+ *	delta, which is what the underlying el_cursor() takes.
+ *
+ *	On Linux with sizeof(wchar_t) == 4 the two are equal and this
+ *	is the identity.  On Windows wchar_t is 16 bits and a non-BMP
+ *	code point lives as a UTF-16 surrogate pair (two wchar_t),
+ *	so the wchar_t step is bigger than the code-point step.
+ *	Without translating, electric-caret jumps over emoji / CJK
+ *	Ext B land mid-surrogate.
+ */
+#if SIZEOF_WCHAR_T == 2
+#  define IS_UTF16_LEAD_(c)  ((c) >= 0xD800 && (c) <= 0xDBFF)
+#  define IS_UTF16_TRAIL_(c) ((c) >= 0xDC00 && (c) <= 0xDFFF)
+#endif
+
+static int
+el_cursor_cp_delta(EditLine *el, int cp_delta)
+{
+#if SIZEOF_WCHAR_T == 2
+  const LineInfoW *li = el_wline(el);
+  const wchar_t *p = li->cursor;
+  int wchar_delta = 0;
+
+  if ( cp_delta == 0 )
+    return 0;
+
+  if ( cp_delta > 0 )
+  { for(int i = 0; i < cp_delta && p < li->lastchar; i++)
+    { if ( IS_UTF16_LEAD_(p[0]) && p+1 < li->lastchar &&
+	   IS_UTF16_TRAIL_(p[1]) )
+      { p += 2; wchar_delta += 2;
+      } else
+      { p += 1; wchar_delta += 1;
+      }
+    }
+  } else
+  { for(int i = 0; i < -cp_delta && p > li->buffer; i++)
+    { p -= 1; wchar_delta -= 1;
+      if ( p > li->buffer && IS_UTF16_TRAIL_(*p) &&
+	   IS_UTF16_LEAD_(p[-1]) )
+      { p -= 1; wchar_delta -= 1;
+      }
+    }
+  }
+  return wchar_delta;
+#else
+  (void)el;
+  return cp_delta;
+#endif
+}
+
+
 /* el_bracketed_paste():
  *	Write the bracketed-paste enable (enable=1) or disable (enable=0)
  *	escape sequence to the terminal output.  On Windows the output handle
@@ -1768,9 +1822,10 @@ prolog_function(EditLine *el, int ch)
 		 PL_get_arg(3, av+3, av+3) &&
 		 PL_get_integer(av+0, &move) &&
 		 PL_get_integer(av+1, &timeout) )
-	    { el_cursor(el, move);
+	    { int wmove = el_cursor_cp_delta(el, move);
+	      el_cursor(el, wmove);
 	      ctx->electric.timeout = timeout;
-	      ctx->electric.move    = -move;
+	      ctx->electric.move    = -wmove;
 	      ctx->electric.state   = E_WAIT;
 	    }
 	  }
@@ -2052,7 +2107,7 @@ pl_cursor(term_t tin, term_t move)
 
   if ( PL_get_integer_ex(move, &amount) &&
        get_el_context(tin, &ctx) )
-  { el_cursor(ctx->el, amount);
+  { el_cursor(ctx->el, el_cursor_cp_delta(ctx->el, amount));
     return TRUE;
   }
 
