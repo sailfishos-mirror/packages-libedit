@@ -2063,12 +2063,17 @@ pl_line(term_t tin, term_t line)
   if ( get_el_context(tin, &ctx) )
   { const LineInfo *li = el_line(ctx->el);
     term_t before, after;
+    /* libedit hands us LineInfo bytes encoded by ct_encode_char: UTF-8
+     * unconditionally on Windows, locale-mb on POSIX.  Use REP_EL so
+     * decoding matches that, instead of always going through mbrtowc
+     * (which fails on non-ASCII bytes when the C runtime's LC_CTYPE
+     * is the legacy ANSI codepage). */
 
     return ( (before = PL_new_term_ref()) &&
 	     (after = PL_new_term_ref()) &&
-	     PL_unify_chars(before, PL_STRING|REP_MB,
+	     PL_unify_chars(before, PL_STRING|REP_EL,
 			    li->cursor - li->buffer, li->buffer) &&
-	     PL_unify_chars(after, PL_STRING|REP_MB,
+	     PL_unify_chars(after, PL_STRING|REP_EL,
 			    li->lastchar - li->cursor, li->cursor) &&
 	     PL_unify_term(line, PL_FUNCTOR, FUNCTOR_line2,
 				   PL_TERM, before,
@@ -2554,7 +2559,7 @@ el_history_encoded(term_t raw, term_t encoded)
       if ( s )
       { s++;
 	len -= s-es;
-	rc = PL_unify_chars(encoded, PL_STRING|REP_MB, len, s);
+	rc = PL_unify_chars(encoded, PL_STRING|REP_EL, len, s);
       }
     }
     free(es);
