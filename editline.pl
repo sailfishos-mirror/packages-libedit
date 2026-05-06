@@ -130,7 +130,8 @@ el_wrap(Options) :-
     add_prolog_commands(user_input),
     ignore(el_set(user_input, wordchars("_"))),
     forall(el_setup(user_input), true),
-    enable_bracketed_paste(user_input).
+    enable_bracketed_paste(user_input),
+    enable_windows_eof(user_input).
 el_wrap(_).
 
 el_default(history(Size)) :-
@@ -177,6 +178,22 @@ enable_bracketed_paste(Input) :-
     ;   el_bind(Input, ["\e[200~", bracketed_paste]),
         el_set(Input, bracketed_paste(true))
     ).
+
+%!  enable_windows_eof(+Input) is det.
+%
+%   Bind ``^Z`` to send end-of-file on Windows, matching the platform
+%   convention (compare with ``^D`` on Unix).  Routed through libedit's
+%   built-in `em-delete-or-list` (emacs) or `vi-list-or-eof` (vi), both
+%   of which return EOF on an empty line.
+
+enable_windows_eof(Input) :-
+    current_prolog_flag(windows, true),
+    !,
+    (   el_get(Input, editor(vi))
+    ->  el_bind(Input, ["^Z", 'vi-list-or-eof'])
+    ;   el_bind(Input, ["^Z", 'em-delete-or-list'])
+    ).
+enable_windows_eof(_).
 
 %!  el_wrap(+ProgName:atom, +In:stream, +Out:stream, +Error:stream) is det.
 %!  el_wrap(+ProgName:atom, +In:stream, +Out:stream, +Error:stream, +Options) is det.
