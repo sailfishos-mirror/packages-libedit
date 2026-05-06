@@ -1547,9 +1547,12 @@ pl_wrap(term_t progid, term_t tin, term_t tout, term_t terr, term_t options)
 	el_set( ctx->el, EL_HIST,       history, ctx->history);
 	el_set( ctx->el, EL_EDITOR,     "emacs");
 	el_set( ctx->el, EL_CLIENTDATA, ctx);
+#ifdef EL_WCWIDTH
 	/* Share the kernel's mk_wcwidth (via PL_wcwidth) so libedit's
-	 * column tracking matches what the rest of SWI-Prolog uses. */
+	 * column tracking matches what the rest of SWI-Prolog uses.
+	 * Only part of our local copy */
 	el_set( ctx->el, EL_WCWIDTH,    PL_wcwidth);
+#endif
 	electric_init(ctx->el);
 
 	ctx->orig_functions  = in->functions;
