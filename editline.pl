@@ -131,6 +131,7 @@ el_wrap(Options) :-
     ignore(el_set(user_input, wordchars("_"))),
     forall(el_setup(user_input), true),
     enable_bracketed_paste(user_input),
+    enable_word_motion(user_input),
     enable_windows_eof(user_input).
 el_wrap(_).
 
@@ -177,6 +178,28 @@ enable_bracketed_paste(Input) :-
         el_set(Input, bracketed_paste(false))
     ;   el_bind(Input, ["\e[200~", bracketed_paste]),
         el_set(Input, bracketed_paste(true))
+    ).
+
+%!  enable_word_motion(+Input) is det.
+%
+%   Bind the xterm Ctrl+Left/Ctrl+Right escape sequences to word
+%   motion.  The Epilog terminal sends ``ESC[1;5D`` and ``ESC[1;5C``
+%   for these key combinations (see packages/xpce/src/txt/terminal.c);
+%   most xterm-compatible terminals use the same sequences.  In vi
+%   mode the binding is installed in both the insert keymap and the
+%   command (alternative) keymap.  Called after the el_setup/1 hooks
+%   since those may switch editor.
+%
+%   This complements the readline emulation, which already binds
+%   these sequences in its initialisation.
+
+enable_word_motion(Input) :-
+    el_bind(Input, ["\e[1;5D", 'ed-prev-word']),
+    el_bind(Input, ["\e[1;5C", 'em-next-word']),
+    (   el_get(Input, editor(vi))
+    ->  el_bind(Input, ['-a', "\e[1;5D", 'vi-prev-word']),
+        el_bind(Input, ['-a', "\e[1;5C", 'vi-next-word'])
+    ;   true
     ).
 
 %!  enable_windows_eof(+Input) is det.
